@@ -1,0 +1,9 @@
+{
+    "identifier": "raj_patel",
+    "password": "Password123!"
+}
+
+{
+    "identifier": "info@techcorp.com",
+    "password": "TechCorp@123"
+}
