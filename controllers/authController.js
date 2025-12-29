@@ -67,6 +67,53 @@ class AuthController {
             errorResponse(res, error.message, 400);
         }
     }
+
+    // Verify email (GET with token)
+    static async verifyEmail(req, res) {
+        try {
+            const { token } = req.query;
+            const result = await AuthService.verifyEmail(token);
+            successResponse(res, 'Email verified', result);
+        } catch (error) {
+            errorResponse(res, error.message, 400);
+        }
+    }
+
+    // Resend verification email
+    static async resendVerification(req, res) {
+        try {
+            const { email } = req.body;
+            if (!email) return errorResponse(res, 'Email is required', 400);
+            const user = await AuthService.resendVerification ? await AuthService.resendVerification(email) : null;
+            successResponse(res, 'Verification email sent', user || {});
+        } catch (error) {
+            errorResponse(res, error.message, 400);
+        }
+    }
+
+    // Forgot password
+    static async forgotPassword(req, res) {
+        try {
+            const { email } = req.body;
+            if (!email) return errorResponse(res, 'Email is required', 400);
+            const result = await AuthService.forgotPassword(email);
+            successResponse(res, 'Password reset email sent', result);
+        } catch (error) {
+            errorResponse(res, error.message, 400);
+        }
+    }
+
+    // Reset password
+    static async resetPassword(req, res) {
+        try {
+            const { token, newPassword } = req.body;
+            if (!token || !newPassword) return errorResponse(res, 'Token and new password required', 400);
+            const result = await AuthService.resetPassword(token, newPassword);
+            successResponse(res, 'Password reset successful', result);
+        } catch (error) {
+            errorResponse(res, error.message, 400);
+        }
+    }
 }
 
 module.exports = AuthController;

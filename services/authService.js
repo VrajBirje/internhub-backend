@@ -4,6 +4,8 @@ const Company = require('../models/Company');
 const Superadmin = require('../models/SuperAdmin');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
+const { sendMail } = require('./mailService');
 
 const generateToken = (userId, userType) => {
     return jwt.sign(
@@ -43,6 +45,14 @@ class AuthService {
         });
 
         await user.save();
+
+        // Send email verification after initial registration (non-blocking)
+        try {
+            await AuthService.sendVerificationEmail(user);
+        } catch (err) {
+            // Log but do not fail registration if email sending fails
+            console.error('Failed to send verification email:', err.message || err);
+        }
 
         // Create student profile with step 1 data
         const student = new Student({
@@ -269,6 +279,95 @@ class AuthService {
             profileCompletion: student.profileCompletion,
             isRegistrationComplete: student.isRegistrationComplete
         };
+    }
+
+    // Send verification email to user
+    static async sendVerificationEmail(user) {
+        if (!user) throw new Error('User is required');
+
+        const token = crypto.randomBytes(32).toString('hex');
+        user.verificationToken = token;
+        user.verificationTokenExpiry = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
+        await user.save();
+
+        const baseUrl = process.env.BASE_URL || process.env.FRONTEND_URL || `http://localhost:${process.env.PORT || 3000}`;
+        const verifyLink = `${baseUrl}/api/auth/verify-email?token=${token}`;
+
+        const subject = 'Verify your email';
+        const html = `<p>Hello ${user.username || ''},</p>
+            <p>Please verify your email by clicking the link below:</p>
+            <a href="${verifyLink}">Verify Email</a>
+            <p>This link will expire in 24 hours.</p>`;
+
+        await sendMail({ to: user.email, subject, html, text: `Verify your email: ${verifyLink}` });
+        return true;
+    }
+
+    // Resend verification email by email address
+    static async resendVerification(email) {
+        if (!email) throw new Error('Email is required');
+        const user = await User.findOne({ email });
+        if (!user) throw new Error('No user found with this email');
+        if (user.emailVerified) throw new Error('Email already verified');
+
+        await AuthService.sendVerificationEmail(user);
+        return { message: 'Verification email resent' };
+    }
+
+    // Verify email using token
+    static async verifyEmail(token) {
+        if (!token) throw new Error('Verification token is required');
+
+        const user = await User.findOne({ verificationToken: token, verificationTokenExpiry: { $gt: Date.now() } });
+        if (!user) throw new Error('Invalid or expired verification token');
+
+        user.emailVerified = true;
+        user.verificationToken = undefined;
+        user.verificationTokenExpiry = undefined;
+        await user.save();
+
+        return { message: 'Email verified successfully' };
+    }
+
+    // Initiate forgot password flow
+    static async forgotPassword(email) {
+        if (!email) throw new Error('Email is required');
+
+        const user = await User.findOne({ email });
+        if (!user) throw new Error('No user found with this email');
+
+        const token = crypto.randomBytes(32).toString('hex');
+        user.resetToken = token;
+        user.resetTokenExpiry = Date.now() + 60 * 60 * 1000; // 1 hour
+        await user.save();
+
+        const baseUrl = process.env.BASE_URL || process.env.FRONTEND_URL || `http://localhost:${process.env.PORT || 3000}`;
+        const resetLink = `${baseUrl}/reset-password?token=${token}`;
+
+        const subject = 'Password reset request';
+        const html = `<p>Hello ${user.username || ''},</p>
+            <p>You requested a password reset. Click the link below to set a new password:</p>
+            <a href="${resetLink}">Reset Password</a>
+            <p>This link will expire in 1 hour. If you didn't request this, ignore this email.</p>`;
+
+        const info = await sendMail({ to: user.email, subject, html, text: `Reset your password: ${resetLink}` });
+        return { message: 'Password reset email sent', previewUrl: info.previewUrl };
+    }
+
+    // Reset password using token
+    static async resetPassword(token, newPassword) {
+        if (!token || !newPassword) throw new Error('Token and new password are required');
+
+        const user = await User.findOne({ resetToken: token, resetTokenExpiry: { $gt: Date.now() } });
+        if (!user) throw new Error('Invalid or expired reset token');
+
+        const hashed = await bcrypt.hash(newPassword, 12);
+        user.password = hashed;
+        user.resetToken = undefined;
+        user.resetTokenExpiry = undefined;
+        await user.save();
+
+        return { message: 'Password reset successfully' };
     }
 }
 

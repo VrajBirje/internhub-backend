@@ -7,6 +7,10 @@ const router = express.Router();
 // Public routes
 router.post('/register/step1', AuthController.registerStep1);
 router.post('/login', AuthController.login);
+router.get('/verify-email', AuthController.verifyEmail);
+router.post('/resend-verification', AuthController.resendVerification);
+router.post('/forgot-password', AuthController.forgotPassword);
+router.post('/reset-password', AuthController.resetPassword);
 
 // Protected routes (require authentication)
 router.put('/register/step/:step', authenticate, AuthController.updateRegistration);
