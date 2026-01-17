@@ -42,32 +42,30 @@ class StudentService {
         const student = await Student.findOne({ user: userId });
         if (!student) throw new Error('Student profile not found');
 
-        student.education = data;
+        student.education.push(data);
         await student.save();
         return student.education;
     }
 
-    static async updateEducation(userId, data) {
+    static async updateEducation(userId, educationId, data) {
         const student = await Student.findOne({ user: userId });
         if (!student) throw new Error('Student profile not found');
     
-        // Since education is embedded, we update it directly
-        student.education = { ...student.education, ...data };
+        const education = student.education.id(educationId);
+        if (!education) throw new Error('Education record not found');
+        
+        Object.assign(education, data);
         await student.save();
         
-        return student.education;
+        return education;
     }
     
-    static async deleteEducation(userId, id) {
+    static async deleteEducation(userId, educationId) {
         const student = await Student.findOne({ user: userId });
         if (!student) throw new Error('Student profile not found');
 
-        if (student.education && student.education._id.equals(id)) {
-            student.education = undefined;
-            await student.save();
-        } else {
-            throw new Error('Education record not found');
-        }
+        student.education = student.education.filter(e => !e._id.equals(educationId));
+        await student.save();
     }
 
     // -------- SKILLS --------

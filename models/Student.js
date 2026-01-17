@@ -1,14 +1,55 @@
 const mongoose = require('mongoose');
 
 const educationSchema = new mongoose.Schema({
-    college: { type: String, required: true },
-    collegeCode: String,
-    branch: { type: String, required: true },
-    branchCode: String,
-    enrollmentYear: { type: Number, required: true, min: 2000, max: new Date().getFullYear() },
-    graduationYear: { type: Number, required: true, min: 2000 },
-    currentSemester: { type: Number, min: 1, max: 8 },
-    cgpa: { type: Number, min: 0, max: 10 }
+    educationType: { 
+        type: String, 
+        required: true,
+        enum: ['School', 'Junior College', 'Diploma', 'Degree', 'Post Graduation']
+    },
+    institutionName: { 
+        type: String, 
+        required: true 
+    },
+    courseName: { 
+        type: String, 
+        required: true 
+    },
+    startYear: { 
+        type: Number, 
+        required: true, 
+        min: 2000, 
+        max: new Date().getFullYear() 
+    },
+    endYear: { 
+        type: Number, 
+        min: 2000 
+    },
+    isCurrentlyStudying: { 
+        type: Boolean, 
+        default: false 
+    },
+    currentYear: {
+        type: Number,
+        min: 1,
+        description: 'Current year/semester if currently studying'
+    },
+    scoreType: {
+        type: String,
+        enum: ['Percentage', 'CGPA', 'Grade', null],
+        default: null
+    },
+    scoreValue: {
+        type: Number,
+        min: 0
+    },
+    boardOrUniversity: String,
+    location: String,
+    displayOrder: { 
+        type: Number, 
+        default: 0 
+    }
+}, {
+    timestamps: true
 });
 
 const skillSchema = new mongoose.Schema({
@@ -64,6 +105,8 @@ const studentSchema = new mongoose.Schema({
     sapId: { type: String, required: true, unique: true, uppercase: true },
     firstName: { type: String, required: true, trim: true },
     lastName: { type: String, required: true, trim: true },
+    linkedin: { type: String, required: true, trim: true },
+    github: { type: String, required: true, trim: true },
     dateOfBirth: { type: Date, required: true },
     gender: { type: String, enum: ['Male', 'Female', 'Other'], required: true },
     phoneNumber: { type: String, required: true, match: /^[0-9]{10}$/ },
@@ -71,7 +114,7 @@ const studentSchema = new mongoose.Schema({
     profilePicture: String,
     
     // Step 2: Education
-    education: educationSchema,
+    education: [educationSchema],
     
     // Step 3: Skills, Experience & Projects
     skills: [skillSchema],
@@ -115,8 +158,7 @@ studentSchema.methods.calculateCompletion = function() {
     }
     
     // Step 2: Education (25%)
-    if (this.education && this.education.college && this.education.branch && 
-        this.education.enrollmentYear && this.education.graduationYear) {
+    if (this.education && this.education.length > 0) {
         completion += 25;
     }
     

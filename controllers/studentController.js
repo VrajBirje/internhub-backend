@@ -57,7 +57,8 @@ class StudentController {
     static async updateEducation(req, res) {
         try {
             const { userId } = req.user;
-            const education = await StudentService.updateEducation(userId, req.body);
+            const { id } = req.params;
+            const education = await StudentService.updateEducation(userId, id, req.body);
             successResponse(res, 'Education updated', education);
         } catch (error) {
             errorResponse(res, error.message, 400);
