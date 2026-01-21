@@ -30,6 +30,16 @@ class AuthController {
         }
     }
 
+    // Complete registration (all steps at once)
+    static async completeRegistration(req, res) {
+        try {
+            const result = await AuthService.completeRegistration(req.body);
+            successResponse(res, 'Registration completed successfully', result, 201);
+        } catch (error) {
+            errorResponse(res, error.message, 400);
+        }
+    }
+
     // Login
     static async login(req, res) {
         try {
@@ -49,8 +59,8 @@ class AuthController {
     // Get registration status
     static async getRegistrationStatus(req, res) {
         try {
-            const { userId } = req.user;
-            const status = await AuthService.getRegistrationStatus(userId);
+            const { email } = req.body;
+            const status = await AuthService.getRegistrationStatus(email);
             successResponse(res, 'Registration status retrieved', status);
         } catch (error) {
             errorResponse(res, error.message, 404);
@@ -68,24 +78,38 @@ class AuthController {
         }
     }
 
-    // Verify email (GET with token)
-    static async verifyEmail(req, res) {
+    // SEND OTP
+    static async sendVerificationEmail(req, res) {
         try {
-            const { token } = req.query;
-            const result = await AuthService.verifyEmail(token);
-            successResponse(res, 'Email verified', result);
+            const { email } = req.body;
+            if (!email) return errorResponse(res, 'Email is required', 400);
+
+            const result = await AuthService.sendEmailVerificationOtp(email);
+            successResponse(res, 'OTP sent successfully', result);
         } catch (error) {
             errorResponse(res, error.message, 400);
         }
     }
 
-    // Resend verification email
+    // VERIFY OTP (POST, not GET)
+    static async verifyEmail(req, res) {
+        try {
+            const { email, otp } = req.body;
+            const result = await AuthService.verifyEmailOtp(email, otp);
+            successResponse(res, 'Email verified successfully', result);
+        } catch (error) {
+            errorResponse(res, error.message, 400);
+        }
+    }
+
+    // RESEND OTP
     static async resendVerification(req, res) {
         try {
             const { email } = req.body;
             if (!email) return errorResponse(res, 'Email is required', 400);
-            const user = await AuthService.resendVerification ? await AuthService.resendVerification(email) : null;
-            successResponse(res, 'Verification email sent', user || {});
+
+            const result = await AuthService.resendVerificationOtp(email);
+            successResponse(res, 'OTP resent successfully', result);
         } catch (error) {
             errorResponse(res, error.message, 400);
         }
@@ -106,9 +130,9 @@ class AuthController {
     // Reset password
     static async resetPassword(req, res) {
         try {
-            const { token, newPassword } = req.body;
-            if (!token || !newPassword) return errorResponse(res, 'Token and new password required', 400);
-            const result = await AuthService.resetPassword(token, newPassword);
+            const { email, otp, newPassword } = req.body;
+            if (!email || !otp || !newPassword) return errorResponse(res, 'Email, OTP and new password required', 400);
+            const result = await AuthService.resetPassword(email, otp, newPassword);
             successResponse(res, 'Password reset successful', result);
         } catch (error) {
             errorResponse(res, error.message, 400);

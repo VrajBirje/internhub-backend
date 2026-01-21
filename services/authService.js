@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const { sendMail } = require('./mailService');
+const { generateOtp } = require('../utils/otp');
 
 const generateToken = (userId, userType) => {
     return jwt.sign(
@@ -132,6 +133,158 @@ class AuthService {
             registrationStep: student.registrationStep,
             profileCompletion: student.profileCompletion,
             isRegistrationComplete: student.isRegistrationComplete
+        };
+    }
+
+    // Complete registration in one go (all steps)
+    static async completeRegistration(userData) {
+        const {
+            username,
+            email,
+            password,
+            // Step 1: Basic Info
+            sapId,
+            firstName,
+            lastName,
+            linkedin,
+            github,
+            dateOfBirth,
+            gender,
+            phoneNumber,
+            alternateEmail,
+            profilePicture,
+            // Step 2: Education
+            education,
+            // Step 3: Skills, Experience, Projects
+            skills,
+            experiences,
+            projects,
+            // Step 4: Resume
+            resumes
+        } = userData;
+
+        // Check if user already exists
+        const existingUser = await User.findOne({
+            $or: [{ email }, { username }]
+        });
+
+        if (existingUser) {
+            throw new Error('User already exists with this email or username');
+        }
+
+        // Check if SAP ID already exists
+        const existingStudent = await Student.findOne({ sapId: sapId });
+        if (existingStudent) {
+            throw new Error('SAP ID already registered');
+        }
+
+        // Validate LinkedIn and GitHub URLs if provided
+        const validateUrl = (url) => {
+            if (!url) return true;
+            try {
+                new URL(url);
+                return true;
+            } catch {
+                return false;
+            }
+        };
+
+        if (linkedin && !validateUrl(linkedin)) {
+            throw new Error('Invalid LinkedIn URL format');
+        }
+
+        if (github && !validateUrl(github)) {
+            throw new Error('Invalid GitHub URL format');
+        }
+
+        // Validate phone number format
+        const phoneRegex = /^[0-9]{10}$/;
+        if (phoneNumber && !phoneRegex.test(phoneNumber)) {
+            throw new Error('Invalid phone number format. Must be 10 digits');
+        }
+
+        // Validate date of birth (must be at least 16 years old)
+        if (dateOfBirth) {
+            const dob = new Date(dateOfBirth);
+            const today = new Date();
+            let age = today.getFullYear() - dob.getFullYear(); // CHANGED TO 'let'
+            const monthDiff = today.getMonth() - dob.getMonth();
+
+            if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
+                age--;
+            }
+
+            if (age < 16) {
+                throw new Error('You must be at least 16 years old to register');
+            }
+        }
+
+        // Create user
+        const hashedPassword = await bcrypt.hash(password, 12);
+        const user = new User({
+            username,
+            email,
+            password: hashedPassword,
+            userType: 'student'
+        });
+
+        await user.save();
+
+        // Send email verification (non-blocking)
+        try {
+            await AuthService.sendVerificationEmail(user);
+        } catch (err) {
+            console.error('Failed to send verification email:', err.message || err);
+        }
+
+        // Create complete student profile
+        const student = new Student({
+            user: user._id,
+            // Step 1 data
+            sapId: sapId.toUpperCase(),
+            firstName,
+            lastName,
+            linkedin,
+            github,
+            dateOfBirth: new Date(dateOfBirth), // Convert to Date object
+            gender,
+            phoneNumber,
+            alternateEmail,
+            profilePicture,
+            // Step 2 data
+            education: education || [],
+            // Step 3 data
+            skills: skills || [],
+            experiences: experiences || [],
+            projects: projects || [],
+            // Step 4 data
+            resumes: resumes || [],
+            // Registration status
+            registrationStep: resumes && resumes.length > 0 ? 4 : 3, // Changed from 5 to 4 (since enum is 1-4)
+            isRegistrationComplete: true,
+            profileCompletion: 100
+        });
+
+        await student.save();
+
+        // Generate token
+        const token = generateToken(user._id, 'student');
+
+        return {
+            token,
+            user: {
+                id: user._id,
+                username: user.username,
+                email: user.email,
+                userType: user.userType
+            },
+            student: {
+                id: student._id,
+                registrationStep: student.registrationStep,
+                profileCompletion: student.profileCompletion,
+                isRegistrationComplete: student.isRegistrationComplete,
+                hasResume: student.resumes && student.resumes.length > 0
+            }
         };
     }
 
@@ -268,8 +421,22 @@ class AuthService {
 
 
     // Get current registration status
-    static async getRegistrationStatus(userId) {
-        const student = await Student.findOne({ user: userId });
+    static async getRegistrationStatus(email) {
+        // Find user by email
+        const user = await User.findOne({ email }).select('_id');
+
+        if (!user) {
+            return {
+                registrationStep: 0,
+                profileCompletion: 0,
+                isRegistrationComplete: false
+            };
+        }
+
+        // Find student by user ID
+        const student = await Student.findOne({ user: user._id })
+            .select('registrationStep profileCompletion isRegistrationComplete');
+
         if (!student) {
             throw new Error('Student profile not found');
         }
@@ -281,53 +448,77 @@ class AuthService {
         };
     }
 
-    // Send verification email to user
-    static async sendVerificationEmail(user) {
-        if (!user) throw new Error('User is required');
+    /* ---------- SEND EMAIL OTP ---------- */
+  static async sendEmailVerificationOtp(email) {
+    const user = await User.findOne({ email });
+    if (!user) throw new Error('No user found with this email');
+    if (user.emailVerified) throw new Error('Email already verified');
 
-        const token = crypto.randomBytes(32).toString('hex');
-        user.verificationToken = token;
-        user.verificationTokenExpiry = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
-        await user.save();
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-        const baseUrl = process.env.BASE_URL || process.env.FRONTEND_URL || `http://localhost:${process.env.PORT || 3000}`;
-        const verifyLink = `${baseUrl}/api/auth/verify-email?token=${token}`;
+    user.emailOtp = otp;
+    user.emailOtpExpiry = Date.now() + 10 * 60 * 1000;
+    await user.save();
 
-        const subject = 'Verify your email';
-        const html = `<p>Hello ${user.username || ''},</p>
-            <p>Please verify your email by clicking the link below:</p>
-            <a href="${verifyLink}">Verify Email</a>
-            <p>This link will expire in 24 hours.</p>`;
+    await sendMail({
+      to: user.email,
+      subject: 'Verify your email address',
+      html: `
+        <p>Hello ${user.username || 'there'},</p>
+        <p>Your verification code is:</p>
+        <h2>${otp}</h2>
+        <p>This code is valid for 10 minutes.</p>
+      `
+    });
 
-        await sendMail({ to: user.email, subject, html, text: `Verify your email: ${verifyLink}` });
-        return true;
-    }
+    return { email: user.email };
+  }
 
-    // Resend verification email by email address
-    static async resendVerification(email) {
-        if (!email) throw new Error('Email is required');
-        const user = await User.findOne({ email });
-        if (!user) throw new Error('No user found with this email');
-        if (user.emailVerified) throw new Error('Email already verified');
+  /* ---------- VERIFY EMAIL OTP ---------- */
+  static async verifyEmailOtp(email, otp) {
+    if (!email || !otp) throw new Error('Email and OTP are required');
 
-        await AuthService.sendVerificationEmail(user);
-        return { message: 'Verification email resent' };
-    }
+    const user = await User.findOne({
+      email,
+      emailOtp: otp,
+      emailOtpExpiry: { $gt: Date.now() }
+    });
+
+    if (!user) throw new Error('Invalid or expired OTP');
+
+    user.emailVerified = true;
+    user.emailOtp = undefined;
+    user.emailOtpExpiry = undefined;
+    await user.save();
+
+    return { emailVerified: true };
+  }
+
+  /* ---------- RESEND OTP ---------- */
+  static async resendVerificationOtp(email) {
+    return AuthService.sendEmailVerificationOtp(email);
+  }
 
     // Verify email using token
-    static async verifyEmail(token) {
-        if (!token) throw new Error('Verification token is required');
+    static async verifyEmailOtp(email, otp) {
+        if (!email || !otp) throw new Error('Email and OTP are required');
 
-        const user = await User.findOne({ verificationToken: token, verificationTokenExpiry: { $gt: Date.now() } });
-        if (!user) throw new Error('Invalid or expired verification token');
+        const user = await User.findOne({
+            email,
+            emailOtp: otp,
+            emailOtpExpiry: { $gt: Date.now() }
+        });
+
+        if (!user) throw new Error('Invalid or expired verification code');
 
         user.emailVerified = true;
-        user.verificationToken = undefined;
-        user.verificationTokenExpiry = undefined;
+        user.emailOtp = undefined;
+        user.emailOtpExpiry = undefined;
         await user.save();
 
         return { message: 'Email verified successfully' };
     }
+
 
     // Initiate forgot password flow
     static async forgotPassword(email) {
@@ -336,39 +527,57 @@ class AuthService {
         const user = await User.findOne({ email });
         if (!user) throw new Error('No user found with this email');
 
-        const token = crypto.randomBytes(32).toString('hex');
-        user.resetToken = token;
-        user.resetTokenExpiry = Date.now() + 60 * 60 * 1000; // 1 hour
+        const otp = generateOtp();
+
+        user.resetOtp = otp;
+        user.resetOtpExpiry = Date.now() + 10 * 60 * 1000; // 10 minutes
         await user.save();
 
-        const baseUrl = process.env.BASE_URL || process.env.FRONTEND_URL || `http://localhost:${process.env.PORT || 3000}`;
-        const resetLink = `${baseUrl}/reset-password?token=${token}`;
+        const subject = 'Password reset verification code';
+        const html = `
+    <p>Hello ${user.username || 'there'},</p>
+    <p>You requested to reset your password.</p>
+    <p>Please use the verification code below:</p>
+    <h2 style="letter-spacing:2px;">${otp}</h2>
+    <p>This code is valid for <b>10 minutes</b>.</p>
+    <p>If you did not request this, you can safely ignore this email.</p>
+  `;
 
-        const subject = 'Password reset request';
-        const html = `<p>Hello ${user.username || ''},</p>
-            <p>You requested a password reset. Click the link below to set a new password:</p>
-            <a href="${resetLink}">Reset Password</a>
-            <p>This link will expire in 1 hour. If you didn't request this, ignore this email.</p>`;
+        await sendMail({
+            to: user.email,
+            subject,
+            html,
+            text: `Your password reset code is ${otp}. It expires in 10 minutes.`
+        });
 
-        const info = await sendMail({ to: user.email, subject, html, text: `Reset your password: ${resetLink}` });
-        return { message: 'Password reset email sent', previewUrl: info.previewUrl };
+        return { message: 'Password reset OTP sent to your email' };
     }
 
-    // Reset password using token
-    static async resetPassword(token, newPassword) {
-        if (!token || !newPassword) throw new Error('Token and new password are required');
 
-        const user = await User.findOne({ resetToken: token, resetTokenExpiry: { $gt: Date.now() } });
-        if (!user) throw new Error('Invalid or expired reset token');
+    // Reset password using token
+    static async resetPassword(email, otp, newPassword) {
+        if (!email || !otp || !newPassword) {
+            throw new Error('Email, OTP and new password are required');
+        }
+
+        const user = await User.findOne({
+            email,
+            resetOtp: otp,
+            resetOtpExpiry: { $gt: Date.now() }
+        });
+
+        if (!user) throw new Error('Invalid or expired OTP');
 
         const hashed = await bcrypt.hash(newPassword, 12);
         user.password = hashed;
-        user.resetToken = undefined;
-        user.resetTokenExpiry = undefined;
+        user.resetOtp = undefined;
+        user.resetOtpExpiry = undefined;
+
         await user.save();
 
         return { message: 'Password reset successfully' };
     }
+
 }
 
 module.exports = AuthService;
