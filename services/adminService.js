@@ -66,8 +66,8 @@ class AdminService {
         
         const students = await Student.find()
             .populate('user', 'username email')
-            .populate('education.college')
-            .populate('education.branch')
+            // .populate('education.college')
+            // .populate('education.branch')
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit);
@@ -85,8 +85,8 @@ class AdminService {
     static async getStudentById(studentId) {
         const student = await Student.findById(studentId)
             .populate('user', 'username email')
-            .populate('education.college')
-            .populate('education.branch');
+            // .populate('education.college')
+            // .populate('education.branch');
         
         if (!student) throw new Error('Student not found');
         return student;

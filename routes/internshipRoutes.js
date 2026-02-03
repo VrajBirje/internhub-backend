@@ -9,6 +9,7 @@ const router = express.Router();
 router.get('/', InternshipController.getAllInternships);
 router.get('/search', InternshipController.searchInternships);
 router.get('/:id', InternshipController.getInternship);
+router.get('/admin/my-internships', InternshipController.getCompanyInternshipsAdmin);
 
 // Company protected routes
 router.use(authenticate);

@@ -9,6 +9,14 @@ const router = express.Router();
 // Public
 router.post('/register/step1', CompanyController.registerStep1);
 
+// Public routes
+router.post('/register/complete', CompanyController.completeRegistration);
+router.post('/verify/send-email', CompanyController.sendEmailVerification);
+router.post('/verify/email', CompanyController.verifyEmail);
+router.post('/verify/resend', CompanyController.resendVerification);
+
+router.get('/profile/superadmin/:userId', CompanyController.getProfileById);
+
 // Protected
 router.use(authenticate);
 

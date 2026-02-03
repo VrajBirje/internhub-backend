@@ -30,10 +30,64 @@ class CompanyController {
         }
     }
 
+    // Complete company registration in one go
+    static async completeRegistration(req, res) {
+        try {
+            const result = await CompanyService.completeRegistration(req.body);
+            successResponse(res, 'Company registration completed successfully', result, 201);
+        } catch (error) {
+            errorResponse(res, error.message, 400);
+        }
+    }
+
+    // Send email verification OTP
+    static async sendEmailVerification(req, res) {
+        try {
+            const { email } = req.body;
+            const result = await CompanyService.sendEmailVerificationOtp(email);
+            successResponse(res, 'Verification email sent', result);
+        } catch (error) {
+            errorResponse(res, error.message, 400);
+        }
+    }
+
+    // Verify email OTP
+    static async verifyEmail(req, res) {
+        try {
+            const { email, otp } = req.body;
+            const result = await CompanyService.verifyEmailOtp(email, otp);
+            successResponse(res, 'Email verified successfully', result);
+        } catch (error) {
+            errorResponse(res, error.message, 400);
+        }
+    }
+
+    // Resend verification OTP
+    static async resendVerification(req, res) {
+        try {
+            const { email } = req.body;
+            const result = await CompanyService.resendVerificationOtp(email);
+            successResponse(res, 'Verification email resent', result);
+        } catch (error) {
+            errorResponse(res, error.message, 400);
+        }
+    }
+
     // Get company profile
     static async getProfile(req, res) {
         try {
             const { userId } = req.user;
+            const profile = await CompanyService.getCompanyProfile(userId);
+            successResponse(res, 'Company profile retrieved', profile);
+        } catch (error) {
+            errorResponse(res, error.message, 404);
+        }
+    }
+
+    // Get company profile by ID
+    static async getProfileById(req, res) {
+        try {
+            const { userId } = req.params;
             const profile = await CompanyService.getCompanyProfile(userId);
             successResponse(res, 'Company profile retrieved', profile);
         } catch (error) {

@@ -29,6 +29,18 @@ class InternshipController {
         }
     }
 
+    // Get company's internships
+    static async getCompanyInternshipsAdmin(req, res) {
+        try {
+            const { companyId } = req.body;
+            const { page = 1, limit = 10 } = req.query;
+            const result = await InternshipService.getCompanyInternships(companyId, parseInt(page), parseInt(limit));
+            successResponse(res, 'Company internships retrieved', result);
+        } catch (error) {
+            errorResponse(res, error.message, 400);
+        }
+    }
+
     // Get internship details
     static async getInternship(req, res) {
         try {

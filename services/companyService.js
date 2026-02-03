@@ -3,6 +3,7 @@ const User = require('../models/User');
 const bcrypt = require('bcryptjs');
 const NotificationService = require('./notificationService');
 const jwt = require('jsonwebtoken');
+const nodemailer = require('nodemailer');
 
 class CompanyService {
     // Step 1: Create user and basic company profile
@@ -116,6 +117,300 @@ class CompanyService {
             profileCompletion: company.profileCompletion,
             isRegistrationComplete: company.profileCompletion === 100
         };
+    }
+
+    // Complete company registration in one go (all 4 steps)
+    static async completeRegistration(companyData) {
+        const {
+            // Step 1: Basic Info
+            username,
+            email,
+            password,
+            companyName,
+            
+            // Step 2: Company Details
+            description,
+            industry,
+            websiteUrl,
+            foundedYear,
+            companySize,
+            logoUrl,
+            
+            // Step 3: Addresses & Contacts
+            addresses,
+            contacts
+        } = companyData;
+
+        // Validate required fields
+        if (!username || !email || !password || !companyName) {
+            throw new Error('Username, email, password, and company name are required');
+        }
+
+        // Check if user already exists
+        const existingUser = await User.findOne({
+            $or: [{ email }, { username }]
+        });
+
+        if (existingUser) {
+            throw new Error('User already exists with this email or username');
+        }
+
+        // Check if company name already exists
+        const existingCompany = await Company.findOne({ companyName });
+        if (existingCompany) {
+            throw new Error('Company name already registered');
+        }
+
+        // Validate website URL if provided
+        if (websiteUrl) {
+            try {
+                new URL(websiteUrl);
+            } catch {
+                throw new Error('Invalid website URL format');
+            }
+        }
+
+        // Validate founded year
+        if (foundedYear) {
+            const currentYear = new Date().getFullYear();
+            if (foundedYear < 1800 || foundedYear > currentYear) {
+                throw new Error(`Founded year must be between 1800 and ${currentYear}`);
+            }
+        }
+
+        // Validate addresses structure
+        if (addresses && Array.isArray(addresses)) {
+            addresses.forEach((address, index) => {
+                if (!address.addressLine1 || !address.city || !address.state || !address.pincode) {
+                    throw new Error(`Address ${index + 1} is missing required fields`);
+                }
+            });
+        }
+
+        // Validate contacts structure
+        if (contacts && Array.isArray(contacts)) {
+            contacts.forEach((contact, index) => {
+                if (!contact.contactName || !contact.email || !contact.phoneNumber) {
+                    throw new Error(`Contact ${index + 1} is missing required fields`);
+                }
+                
+                // Validate email format
+                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                if (!emailRegex.test(contact.email)) {
+                    throw new Error(`Contact ${index + 1} has invalid email format`);
+                }
+                
+                // Validate phone number (basic validation)
+                const phoneRegex = /^[0-9]{10}$/;
+                if (!phoneRegex.test(contact.phoneNumber)) {
+                    throw new Error(`Contact ${index + 1} phone number must be 10 digits`);
+                }
+            });
+        }
+
+        // Create user
+        const hashedPassword = await bcrypt.hash(password, 12);
+        const user = new User({
+            username,
+            email,
+            password: hashedPassword,
+            userType: 'company'
+        });
+
+        await user.save();
+
+        // Send email verification (non-blocking)
+        try {
+            await this.sendEmailVerificationOtp(email);
+        } catch (err) {
+            console.error('Failed to send verification email:', err.message);
+            // Don't throw error - registration should continue even if email fails
+        }
+
+        // Create complete company profile
+        const company = new Company({
+            user: user._id,
+            // Step 1 data
+            companyName,
+            // Step 2 data
+            description,
+            industry,
+            websiteUrl,
+            foundedYear,
+            companySize,
+            logoUrl,
+            // Step 3 data
+            addresses: addresses || [],
+            contacts: contacts || [],
+            // Step 4 will be handled by admin verification
+            // Registration status
+            registrationStep: 4, // All steps completed by user
+            isRegistrationComplete: true,
+            profileCompletion: 75 // 25% for step 1, 25% for step 2, 25% for step 3, 25% pending for verification
+        });
+
+        await company.save();
+
+        // Generate JWT token
+        const token = jwt.sign(
+            { 
+                userId: user._id, 
+                userType: user.userType,
+                email: user.email,
+                companyId: company._id 
+            },
+            process.env.JWT_SECRET,
+            { expiresIn: '7d' }
+        );
+
+        return {
+            token,
+            user: {
+                id: user._id,
+                username: user.username,
+                email: user.email,
+                userType: user.userType,
+                emailVerified: user.emailVerified || false
+            },
+            company: {
+                id: company._id,
+                companyName: company.companyName,
+                registrationStep: company.registrationStep,
+                profileCompletion: company.profileCompletion,
+                isRegistrationComplete: company.isRegistrationComplete,
+                isVerified: company.isVerified
+            }
+        };
+    }
+
+    /* ---------- EMAIL VERIFICATION METHODS ---------- */
+
+    // Send email verification OTP
+    static async sendEmailVerificationOtp(email) {
+        const user = await User.findOne({ email });
+        if (!user) {
+            throw new Error('No user found with this email');
+        }
+        
+        if (user.emailVerified) {
+            throw new Error('Email already verified');
+        }
+
+        // Generate 6-digit OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+        // Save OTP to user (expires in 10 minutes)
+        user.emailOtp = otp;
+        user.emailOtpExpiry = Date.now() + 10 * 60 * 1000; // 10 minutes
+        await user.save();
+
+        // Send email
+        await this.sendVerificationEmail(user, otp);
+
+        return { 
+            message: 'Verification email sent successfully',
+            email: user.email,
+            expiresIn: '10 minutes'
+        };
+    }
+
+    // Verify email OTP
+    static async verifyEmailOtp(email, otp) {
+        if (!email || !otp) {
+            throw new Error('Email and OTP are required');
+        }
+
+        const user = await User.findOne({
+            email,
+            emailOtp: otp,
+            emailOtpExpiry: { $gt: Date.now() }
+        });
+
+        if (!user) {
+            throw new Error('Invalid or expired OTP');
+        }
+
+        // Mark email as verified
+        user.emailVerified = true;
+        user.emailOtp = undefined;
+        user.emailOtpExpiry = undefined;
+        await user.save();
+
+        return { 
+            success: true, 
+            message: 'Email verified successfully',
+            emailVerified: true 
+        };
+    }
+
+    // Resend verification OTP
+    static async resendVerificationOtp(email) {
+        return this.sendEmailVerificationOtp(email);
+    }
+
+    /* ---------- PRIVATE HELPER METHODS ---------- */
+
+    // Send verification email
+    static async sendVerificationEmail(user, otp) {
+        // Create email transporter
+        const transporter = nodemailer.createTransport({
+            host: process.env.SMTP_HOST,
+            port: process.env.SMTP_PORT,
+            secure: process.env.SMTP_PORT === '465', // true for 465, false for other ports
+            auth: {
+                user: process.env.SMTP_USER,
+                pass: process.env.SMTP_PASS
+            }
+        });
+
+        const mailOptions = {
+            from: `"Company Portal" <${process.env.SMTP_FROM}>`,
+            to: user.email,
+            subject: 'Verify Your Email Address',
+            html: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center;">
+                        <h1 style="color: white; margin: 0;">Company Portal</h1>
+                    </div>
+                    
+                    <div style="padding: 30px; background-color: #f9f9f9;">
+                        <h2 style="color: #333;">Email Verification</h2>
+                        <p style="color: #666; font-size: 16px; line-height: 1.6;">
+                            Hello ${user.username},<br><br>
+                            Thank you for registering with Company Portal. Please use the OTP below to verify your email address:
+                        </p>
+                        
+                        <div style="text-align: center; margin: 30px 0;">
+                            <div style="background: white; padding: 20px; border-radius: 10px; display: inline-block; border: 2px dashed #667eea;">
+                                <span style="font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #764ba2;">
+                                    ${otp}
+                                </span>
+                            </div>
+                        </div>
+                        
+                        <p style="color: #666; font-size: 14px;">
+                            This OTP is valid for 10 minutes.<br>
+                            If you didn't create an account, please ignore this email.
+                        </p>
+                    </div>
+                    
+                    <div style="background-color: #f1f1f1; padding: 20px; text-align: center; color: #888; font-size: 12px;">
+                        <p>&copy; ${new Date().getFullYear()} Company Portal. All rights reserved.</p>
+                    </div>
+                </div>
+            `
+        };
+
+        await transporter.sendMail(mailOptions);
+    }
+
+    // Helper method to generate JWT token
+    static generateToken(userId, userType) {
+        return jwt.sign(
+            { userId, userType },
+            process.env.JWT_SECRET,
+            { expiresIn: '7d' }
+        );
     }
 
     // Get company profile
