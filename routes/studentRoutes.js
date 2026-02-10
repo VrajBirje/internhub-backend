@@ -17,7 +17,7 @@ router.post('/profile/photo', authenticate, isStudent, upload.single('photo'), S
 // -------- EDUCATION --------
 router.get('/education', authenticate, isStudent, StudentController.getEducation);
 router.post('/education', authenticate, isStudent, StudentController.addEducation);
-router.put('/education', authenticate, isStudent, StudentController.updateEducation);
+router.put('/education/:id', authenticate, isStudent, StudentController.updateEducation);
 router.delete('/education/:id', authenticate, isStudent, StudentController.deleteEducation);
 
 // -------- SKILLS --------

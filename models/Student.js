@@ -39,7 +39,7 @@ const educationSchema = new mongoose.Schema({
         default: null
     },
     scoreValue: {
-        type: Number,
+        type: String,
         min: 0
     },
     boardOrUniversity: String,
